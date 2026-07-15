@@ -52,6 +52,10 @@ def save_config(start, end, initial_total):
 
 # --- 画面構成 ---
 st.set_page_config(page_title="クエスト勉強管理", page_icon="🎒", layout="centered")
+
+# 🌐 アプリの本番ページに飛ぶボタン（必要に応じてURLを書き換えてください）
+st.link_button("🌐 アプリのページを開く（ブックマーク用）", "https://share.streamlit.io/", use_container_width=True)
+
 st.title("🎒 クエスト型 勉強タスク管理")
 
 if "today_menu" not in st.session_state:
@@ -61,10 +65,11 @@ if "selected_subjects" not in st.session_state:
 if "selected_books" not in st.session_state:
     st.session_state.selected_books = []
 
+# 「クエスト一覧」を「タスク一覧」に変更しました
 tab1, tab2, tab_list, tab3, tab4 = st.tabs([
     "🎮 今日のメニュー", 
     "➕ タスク一括登録", 
-    "📋 クエスト一覧", 
+    "📋 タスク一覧", 
     "📅 計画設定 & ペース", 
     "📊 完了履歴"
 ])
@@ -124,8 +129,7 @@ with tab1:
             today = datetime.date.today()
             today_completed_ids = df_log[df_log["完了日"] == today]["タスクID"].tolist()
             
-            # --- 👑 終わったクエストを一番下に並び替える処理 ---
-            # 完了状態を判定して、未完了を上に、完了済みを下にソート
+            # --- 終わったクエストを一番下に並び替える処理 ---
             sorted_menu = sorted(
                 st.session_state.today_menu,
                 key=lambda x: 1 if int(x["ID"]) in today_completed_ids else 0
@@ -135,7 +139,6 @@ with tab1:
                 task_id = int(task["ID"])
                 is_done = task_id in today_completed_ids
                 
-                # 完了しているタスクには「[済]」をつけ、打ち消し線風にする
                 label_prefix = "✅ [クリア済み] " if is_done else "⚔️ "
                 checked = st.checkbox(
                     f"{label_prefix}【{task['科目']}】 {task['参考書']} ({task['章']}) - {task['タスク名']}", 
@@ -172,11 +175,9 @@ with tab2:
     with st.form("bulk_register"):
         col1, col2 = st.columns(2)
         with col1:
-            # 💡 初期値を空欄に変更しました
             sub = st.text_input("科目", "")
             book = st.text_input("参考書名", "")
         with col2:
-            # 💡 初期値を空欄に変更しました
             chapter = st.text_input("章名", "")
             total_num = st.number_input("追加する問題の総数", min_value=1, max_value=100, value=10)
             
@@ -198,7 +199,6 @@ with tab2:
             else:
                 df_tasks = load_tasks()
                 
-                # 既存のデータフレームに必要なカラムが存在しない場合の互換性処理
                 if "タイプ" not in df_tasks.columns:
                     df_tasks["タイプ"] = "例題"
                 if "タイプ内番号" not in df_tasks.columns:
@@ -206,12 +206,10 @@ with tab2:
                     
                 start_id = df_tasks["ID"].max() + 1 if not df_tasks.empty else 1
                 
-                # 開始番号の決定
                 start_ex_num = 1
                 start_prac_num = 1
                 
                 if continue_numbering and not df_tasks.empty:
-                    # この科目＆参考書で登録済みのタスクを探す
                     history = df_tasks[(df_tasks["科目"] == sub) & (df_tasks["参考書"] == book)]
                     if not history.empty:
                         ex_history = history[history["タイプ"] == "例題"]
@@ -257,7 +255,7 @@ with tab2:
                         "参考書": book,
                         "章": chapter,
                         "タスク名": task_title,
-                        "連番": i, # この章の中での並び順
+                        "連番": i,
                         "完了フラグ": 0,
                         "タイプ": task_type,
                         "タイプ内番号": type_num
@@ -267,30 +265,25 @@ with tab2:
                 new_df = pd.DataFrame(new_rows)
                 df_tasks = pd.concat([df_tasks, new_df], ignore_index=True)
                 save_tasks(df_tasks)
-                st.success(f"🎯 【{sub}】のタスクを {total_num} 件生成しました！ (例題は {start_ex_num}〜, 練習は {start_prac_num}〜)")
+                st.success(f"🎯 【{sub}】のタスクを {total_num} 件生成しました！")
 
-# --- TAB_LIST: クエスト一覧 ---
+# --- TAB_LIST: タスク一覧 (UIをスマホで見やすい縦列に変更) ---
 with tab_list:
-    st.subheader("📋 登録済みのクエスト一覧")
+    st.subheader("📋 登録済みのタスク一覧")
     df_tasks = load_tasks()
     
     if df_tasks.empty:
-        st.info("登録されているクエストはありません。「タスク一括登録」から登録してください。")
+        st.info("登録されているタスクはありません。")
     else:
-        if "タイプ" not in df_tasks.columns:
-            df_tasks["タイプ"] = "例題"
-        if "タイプ内番号" not in df_tasks.columns:
-            df_tasks["タイプ内番号"] = df_tasks["連番"]
-
         df_display = df_tasks.copy()
-        df_display["ステータス"] = df_display["完了フラグ"].apply(lambda x: "✅ 完了" if x == 1 else "⏳ 未完了")
         
+        # 簡易検索・絞り込み
         st.write("🔍 **絞り込み**")
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            filter_sub = st.selectbox("科目で絞り込む:", ["すべて"] + sorted(list(df_tasks["科目"].unique())))
+            filter_sub = st.selectbox("科目:", ["すべて"] + sorted(list(df_tasks["科目"].unique())))
         with col_f2:
-            filter_status = st.selectbox("状態:", ["すべて", "未完了のみ", "完了のみ"])
+            filter_status = st.selectbox("進行度:", ["すべて", "未完了のみ", "完了のみ"])
             
         if filter_sub != "すべて":
             df_display = df_display[df_display["科目"] == filter_sub]
@@ -301,15 +294,35 @@ with tab_list:
             df_display = df_display[df_display["完了フラグ"] == 1]
             
         st.write(f"該当件数: **{len(df_display)}** 件")
+        st.write("---")
         
-        st.dataframe(
-            df_display[["ID", "ステータス", "科目", "参考書", "章", "タスク名"]], 
-            use_container_width=True,
-            hide_index=True
-        )
+        # 📱 スマホ用に「縦並びのカード風デザイン」で表示
+        for index, row in df_display.iterrows():
+            status_emoji = "✅ [完了]" if row["完了フラグ"] == 1 else "⏳ [未完了]"
+            bg_color = "#e8f5e9" if row["完了フラグ"] == 1 else "#f5f5f5"
+            border_color = "#2e7d32" if row["完了フラグ"] == 1 else "#9e9e9e"
+            
+            # HTMLを使って1つの枠内にすべての情報を縦に並べる
+            st.markdown(
+                f"""
+                <div style="
+                    background-color: {bg_color}; 
+                    border: 1px solid {border_color}; 
+                    padding: 12px; 
+                    border-radius: 8px; 
+                    margin-bottom: 10px;
+                ">
+                    <span style="font-weight: bold; font-size: 14px; color: {border_color};">{status_emoji} (ID: {row['ID']})</span><br>
+                    <span style="font-size: 16px; font-weight: bold; color: #1e1e1e;">📘 {row['科目']} / {row['参考書']}</span><br>
+                    <span style="font-size: 14px; color: #555555;">📁 章: {row['章']}</span><br>
+                    <span style="font-size: 15px; font-weight: bold; color: #2c3e50;">⚔️ クエスト: {row['タスク名']}</span>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
         
         st.write("---")
-        st.write("⚠️ **クエストの削除（個別・一括）**")
+        st.write("⚠️ **タスクの削除（個別・一括）**")
         delete_option = st.selectbox("削除方法:", ["選択しない", "個別に削除", "すべて削除"])
         
         if delete_option == "個別に削除":
@@ -370,7 +383,7 @@ with tab3:
         
         col_p1, col_p2 = st.columns(2)
         with col_p1:
-            st.metric(label="🗺️ 当初の目標ペース", value=f"{initial_pace:.1f} 問 / 日")
+            st.metric(label="🗺️ 当朝の目標ペース", value=f"{initial_pace:.1f} 問 / 日")
         with col_p2:
             diff = current_pace - initial_pace
             delta_val = f"{diff:+.1f} 問" if diff != 0 else "キープ中"

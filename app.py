@@ -53,7 +53,7 @@ def save_config(start, end, initial_total):
 # --- 画面構成 ---
 st.set_page_config(page_title="クエスト勉強管理", page_icon="🎒", layout="centered")
 
-# 🌐 アプリの本番ページに飛ぶボタン（必要に応じてURLを書き換えてください）
+# 🌐 アプリの本番ページに飛ぶボタン
 st.link_button("🌐 アプリのページを開く（ブックマーク用）", "https://share.streamlit.io/", use_container_width=True)
 
 st.title("🎒 クエスト型 勉強タスク管理")
@@ -65,7 +65,6 @@ if "selected_subjects" not in st.session_state:
 if "selected_books" not in st.session_state:
     st.session_state.selected_books = []
 
-# 「クエスト一覧」を「タスク一覧」に変更しました
 tab1, tab2, tab_list, tab3, tab4 = st.tabs([
     "🎮 今日のメニュー", 
     "➕ タスク一括登録", 
@@ -74,7 +73,7 @@ tab1, tab2, tab_list, tab3, tab4 = st.tabs([
     "📊 完了履歴"
 ])
 
-# --- TAB 1: 今日のメニュー ---
+# --- TAB 1: 今日のメニュー (スマホ用縦列カードUIに変更) ---
 with tab1:
     st.subheader("🔥 今日のクエスト")
     df_tasks = load_tasks()
@@ -93,25 +92,23 @@ with tab1:
         selected_books = []
         if selected_subs:
             available_books = sorted(list(uncompleted[uncompleted["科目"].isin(selected_subs)]["参考書"].unique()))
-            # 前回の選択が有効かチェックしつつデフォルト値を設定
             default_books = [b for b in st.session_state.selected_books if b in available_books]
             selected_books = st.multiselect("2. 対象の参考書を選択:", available_books, default=default_books)
             st.session_state.selected_books = selected_books
         
-        num_tasks = st.number_input("今日のタスク数:", min_value=1, max_value=10, value=3)
+        # 初期値を最小限の「1」に設定
+        num_tasks = st.number_input("今日のタスク数:", min_value=1, max_value=10, value=1)
         
         if st.button("🎲 クエストを生成する", use_container_width=True):
             if not selected_subs or not selected_books:
                 st.warning("科目と参考書をそれぞれ1つ以上選択してください。")
             else:
                 candidates = []
-                # 選択された科目・参考書に絞り込む
                 filtered_tasks = uncompleted[
                     (uncompleted["科目"].isin(selected_subs)) & 
                     (uncompleted["参考書"].isin(selected_books))
                 ]
                 
-                # 各参考書ごとに、最も連番が若い（次の）タスクを候補にする
                 for book in filtered_tasks["参考書"].unique():
                     book_tasks = filtered_tasks[filtered_tasks["参考書"] == book]
                     next_task = book_tasks.sort_values(by="連番").iloc[0]
@@ -129,19 +126,43 @@ with tab1:
             today = datetime.date.today()
             today_completed_ids = df_log[df_log["完了日"] == today]["タスクID"].tolist()
             
-            # --- 終わったクエストを一番下に並び替える処理 ---
+            # 終わったクエストを一番下に並び替える処理
             sorted_menu = sorted(
                 st.session_state.today_menu,
                 key=lambda x: 1 if int(x["ID"]) in today_completed_ids else 0
             )
             
+            # 📱 今日のメニューも「縦並びのカード風UI」で表示
             for task in sorted_menu:
                 task_id = int(task["ID"])
                 is_done = task_id in today_completed_ids
                 
-                label_prefix = "✅ [クリア済み] " if is_done else "⚔️ "
+                status_text = "✅ クリア済み" if is_done else "⚔️ 挑戦中"
+                bg_color = "#e8f5e9" if is_done else "#fffdf0"  # 未完了は少し温かみのある黄色
+                border_color = "#2e7d32" if is_done else "#f1c40f"
+                
+                # HTMLカードでタスクの詳細を美しく縦表示
+                st.markdown(
+                    f"""
+                    <div style="
+                        background-color: {bg_color}; 
+                        border: 2px solid {border_color}; 
+                        padding: 12px; 
+                        border-radius: 8px; 
+                        margin-bottom: 8px;
+                    ">
+                        <span style="font-weight: bold; font-size: 13px; color: {border_color};">{status_text}</span><br>
+                        <span style="font-size: 16px; font-weight: bold; color: #1e1e1e;">📘 {task['科目']} / {task['参考書']}</span><br>
+                        <span style="font-size: 13px; color: #555555;">📁 {task['章']}</span><br>
+                        <span style="font-size: 15px; font-weight: bold; color: #2c3e50;">🔥 クエスト: {task['タスク名']}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                
+                # カードのすぐ下に対応するチェックボックスを配置
                 checked = st.checkbox(
-                    f"{label_prefix}【{task['科目']}】 {task['参考書']} ({task['章']}) - {task['タスク名']}", 
+                    f"完了したらチェック！ (ID: {task_id})", 
                     value=is_done, 
                     key=f"chk_{task_id}"
                 )
@@ -169,7 +190,7 @@ with tab1:
                     st.warning("クリアを取り消しました。")
                     st.rerun()
 
-# --- TAB 2: タスク一括登録 ---
+# --- TAB 2: タスク一括登録 (問題数や比率の初期値も最小限にリセット) ---
 with tab2:
     st.subheader("📝 章単位の一括登録")
     with st.form("bulk_register"):
@@ -179,14 +200,17 @@ with tab2:
             book = st.text_input("参考書名", "")
         with col2:
             chapter = st.text_input("章名", "")
-            total_num = st.number_input("追加する問題の総数", min_value=1, max_value=100, value=10)
+            # 💡 初期値を空欄（最小の1）に変更
+            total_num = st.number_input("追加する問題の総数", min_value=1, max_value=100, value=1)
             
         st.write("▼ 例題と練習の比率")
         col3, col4 = st.columns(2)
         with col3:
-            ex_pattern = st.number_input("例題が続く数", min_value=1, max_value=50, value=2)
+            # 💡 初期値を最小の1に変更
+            ex_pattern = st.number_input("例題が続く数", min_value=1, max_value=50, value=1)
         with col4:
-            prac_pattern = st.number_input("その後の練習の数", min_value=1, max_value=50, value=8)
+            # 💡 初期値を最小の1に変更
+            prac_pattern = st.number_input("その後の練習の数", min_value=1, max_value=50, value=1)
             
         st.write("▼ 番号の引き継ぎ設定")
         continue_numbering = st.checkbox("前回の続きの番号から登録する", value=True, help="チェックを入れると、前回の『例題』『練習』の最後の番号の続きから開始します。")
@@ -267,7 +291,7 @@ with tab2:
                 save_tasks(df_tasks)
                 st.success(f"🎯 【{sub}】のタスクを {total_num} 件生成しました！")
 
-# --- TAB_LIST: タスク一覧 (UIをスマホで見やすい縦列に変更) ---
+# --- TAB_LIST: タスク一覧 ---
 with tab_list:
     st.subheader("📋 登録済みのタスク一覧")
     df_tasks = load_tasks()
@@ -277,7 +301,6 @@ with tab_list:
     else:
         df_display = df_tasks.copy()
         
-        # 簡易検索・絞り込み
         st.write("🔍 **絞り込み**")
         col_f1, col_f2 = st.columns(2)
         with col_f1:
@@ -296,13 +319,11 @@ with tab_list:
         st.write(f"該当件数: **{len(df_display)}** 件")
         st.write("---")
         
-        # 📱 スマホ用に「縦並びのカード風デザイン」で表示
         for index, row in df_display.iterrows():
             status_emoji = "✅ [完了]" if row["完了フラグ"] == 1 else "⏳ [未完了]"
             bg_color = "#e8f5e9" if row["完了フラグ"] == 1 else "#f5f5f5"
             border_color = "#2e7d32" if row["完了フラグ"] == 1 else "#9e9e9e"
             
-            # HTMLを使って1つの枠内にすべての情報を縦に並べる
             st.markdown(
                 f"""
                 <div style="
@@ -383,7 +404,7 @@ with tab3:
         
         col_p1, col_p2 = st.columns(2)
         with col_p1:
-            st.metric(label="🗺️ 当朝の目標ペース", value=f"{initial_pace:.1f} 問 / 日")
+            st.metric(label="🗺️ 当初の目標ペース", value=f"{initial_pace:.1f} 問 / 日")
         with col_p2:
             diff = current_pace - initial_pace
             delta_val = f"{diff:+.1f} 問" if diff != 0 else "キープ中"

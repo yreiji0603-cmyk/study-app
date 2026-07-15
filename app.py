@@ -13,7 +13,7 @@ CONFIG_FILE = "config_db.csv"   # 目標・期間設定
 def load_tasks():
     if os.path.exists(TASKS_FILE):
         return pd.read_csv(TASKS_FILE)
-    return pd.DataFrame(columns=["ID", "科目", "参考書", "章", "タスク名", "連番", "完了フラグ"])
+    return pd.DataFrame(columns=["ID", "科目", "参考書", "章", "タスク名", "連番", "完了フラグ", "タイプ", "タイプ内番号"])
 
 def save_tasks(df):
     df.to_csv(TASKS_FILE, index=False)
@@ -59,7 +59,13 @@ if "today_menu" not in st.session_state:
 if "selected_subjects" not in st.session_state:
     st.session_state.selected_subjects = []
 
-tab1, tab2, tab3, tab4 = st.tabs(["🎮 今日のメニュー", "➕ タスク一括登録", "📅 計画設定 & ペース", "📊 完了履歴"])
+tab1, tab2, tab_list, tab3, tab4 = st.tabs([
+    "🎮 今日のメニュー", 
+    "➕ タスク一括登録", 
+    "📋 クエスト一覧", 
+    "📅 計画設定 & ペース", 
+    "📊 完了履歴"
+])
 
 # --- TAB 1: 今日のメニュー ---
 with tab1:
@@ -140,8 +146,8 @@ with tab2:
             sub = st.text_input("科目", "数学")
             book = st.text_input("参考書名", "青チャート")
         with col2:
-            chapter = st.text_input("章名", "第1章")
-            total_num = st.number_input("問題の総数", min_value=1, max_value=100, value=10)
+            chapter = st.text_input("章名", "第2章")
+            total_num = st.number_input("追加する問題の総数", min_value=1, max_value=100, value=10)
             
         st.write("▼ 例題と練習の比率")
         col3, col4 = st.columns(2)
@@ -150,26 +156,64 @@ with tab2:
         with col4:
             prac_pattern = st.number_input("その後の練習の数", min_value=1, max_value=50, value=8)
             
+        # 🔗 新機能：番号の引き継ぎ設定
+        st.write("▼ 番号の引き継ぎ設定")
+        continue_numbering = st.checkbox("前回の続きの番号から登録する", value=True, help="チェックを入れると、前回の『例題』『練習』の最後の番号の続きから開始します。")
+            
         submit = st.form_submit_button("タスクを一括生成する")
         
         if submit:
             df_tasks = load_tasks()
+            
+            # 既存のデータフレームに必要なカラムが存在しない場合の互換性処理
+            if "タイプ" not in df_tasks.columns:
+                df_tasks["タイプ"] = "例題"
+            if "タイプ内番号" not in df_tasks.columns:
+                df_tasks["タイプ内番号"] = df_tasks["連番"]
+                
             start_id = df_tasks["ID"].max() + 1 if not df_tasks.empty else 1
             
+            # 開始番号の決定
+            start_ex_num = 1
+            start_prac_num = 1
+            
+            if continue_numbering and not df_tasks.empty:
+                # この科目＆参考書で登録済みのタスクを探す
+                history = df_tasks[(df_tasks["科目"] == sub) & (df_tasks["参考書"] == book)]
+                if not history.empty:
+                    ex_history = history[history["タイプ"] == "例題"]
+                    prac_history = history[history["タイプ"] == "練習"]
+                    
+                    if not ex_history.empty:
+                        start_ex_num = int(ex_history["タイプ内番号"].max()) + 1
+                    if not prac_history.empty:
+                        start_prac_num = int(prac_history["タイプ内番号"].max()) + 1
+
             new_rows = []
             current_type = "例題"
             pattern_counter = 0
             
+            ex_idx = start_ex_num
+            prac_idx = start_prac_num
+            
             for i in range(1, total_num + 1):
                 if current_type == "例題":
                     pattern_counter += 1
-                    task_title = f"例題 {i}"
+                    task_title = f"例題 {ex_idx}"
+                    task_type = "例題"
+                    type_num = ex_idx
+                    ex_idx += 1
+                    
                     if pattern_counter >= ex_pattern:
                         current_type = "練習"
                         pattern_counter = 0
                 else:
                     pattern_counter += 1
-                    task_title = f"練習 {i}"
+                    task_title = f"練習 {prac_idx}"
+                    task_type = "練習"
+                    type_num = prac_idx
+                    prac_idx += 1
+                    
                     if pattern_counter >= prac_pattern:
                         current_type = "例題"
                         pattern_counter = 0
@@ -180,15 +224,83 @@ with tab2:
                     "参考書": book,
                     "章": chapter,
                     "タスク名": task_title,
-                    "連番": i,
-                    "完了フラグ": 0
+                    "連番": i, # この章の中での並び順
+                    "完了フラグ": 0,
+                    "タイプ": task_type,
+                    "タイプ内番号": type_num
                 })
                 start_id += 1
                 
             new_df = pd.DataFrame(new_rows)
             df_tasks = pd.concat([df_tasks, new_df], ignore_index=True)
             save_tasks(df_tasks)
-            st.success(f"🎯 タスクを {total_num} 件生成しました！")
+            st.success(f"🎯 【{sub}】のタスクを {total_num} 件生成しました！ (例題は {start_ex_num}〜, 練習は {start_prac_num}〜)")
+
+# --- TAB_LIST: クエスト一覧 ---
+with tab_list:
+    st.subheader("📋 登録済みのクエスト一覧")
+    df_tasks = load_tasks()
+    
+    if df_tasks.empty:
+        st.info("登録されているクエストはありません。「タスク一括登録」から登録してください。")
+    else:
+        # 古いデータ構造だった場合の補正
+        if "タイプ" not in df_tasks.columns:
+            df_tasks["タイプ"] = "例題"
+        if "タイプ内番号" not in df_tasks.columns:
+            df_tasks["タイプ内番号"] = df_tasks["連番"]
+
+        df_display = df_tasks.copy()
+        df_display["ステータス"] = df_display["完了フラグ"].apply(lambda x: "✅ 完了" if x == 1 else "⏳ 未完了")
+        
+        st.write("🔍 **絞り込み**")
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            filter_sub = st.selectbox("科目で絞り込む:", ["すべて"] + sorted(list(df_tasks["科目"].unique())))
+        with col_f2:
+            filter_status = st.selectbox("状態:", ["すべて", "未完了のみ", "完了のみ"])
+            
+        if filter_sub != "すべて":
+            df_display = df_display[df_display["科目"] == filter_sub]
+            
+        if filter_status == "未完了のみ":
+            df_display = df_display[df_display["完了フラグ"] == 0]
+        elif filter_status == "完了のみ":
+            df_display = df_display[df_display["完了フラグ"] == 1]
+            
+        st.write(f"該当件数: **{len(df_display)}** 件")
+        
+        st.dataframe(
+            df_display[["ID", "ステータス", "科目", "参考書", "章", "タスク名"]], 
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        st.write("---")
+        st.write("⚠️ **クエストの削除（個別・一括）**")
+        delete_option = st.selectbox("削除方法:", ["選択しない", "個別に削除", "すべて削除"])
+        
+        if delete_option == "個別に削除":
+            delete_id = st.selectbox(
+                "削除するタスクを選択:", 
+                options=df_display["ID"].tolist(),
+                format_func=lambda x: f"ID {x}: {df_tasks.loc[df_tasks['ID'] == x, '科目'].values[0]} - {df_tasks.loc[df_tasks['ID'] == x, 'タスク名'].values[0]}"
+            )
+            if st.button("🚨 選択したタスクを削除する", use_container_width=True):
+                df_tasks = df_tasks[df_tasks["ID"] != delete_id]
+                save_tasks(df_tasks)
+                st.success("削除しました！")
+                st.rerun()
+                
+        elif delete_option == "すべて削除":
+            st.warning("登録されているすべてのクエストが削除され、元に戻せなくなります。")
+            confirm = st.checkbox("本当にすべてのクエストを削除することに同意します")
+            if confirm:
+                if st.button("🔥 すべてのクエストを完全削除する", use_container_width=True):
+                    df_empty = pd.DataFrame(columns=["ID", "科目", "参考書", "章", "タスク名", "連番", "完了フラグ", "タイプ", "タイプ内番号"])
+                    save_tasks(df_empty)
+                    st.success("すべてのタスクをリセットしました！")
+                    st.rerun()
 
 # --- TAB 3: 計画設定 & ペース計算 ---
 with tab3:

@@ -476,4 +476,44 @@ with tab3:
     if st.button("スケジュールを保存する"):
         total_tasks = len(df_tasks)
         save_config(start_date, end_date, total_tasks)
-        st.success("スケジュールと初期タスク数を
+        st.success("スケジュールと初期タスク数を記録しました！")
+        st.rerun()
+        
+    st.write("---")
+    st.write("📊 **ペース分析**")
+    today = datetime.date.today()
+    total_days = (end_date - start_date).days + 1
+    remaining_days = (end_date - today).days + 1
+    
+    if remaining_days <= 0:
+        st.warning("設定された期間はすでに終了しています。")
+    elif config["initial_total"] == 0:
+        st.info("スケジュールを保存すると、目標ペースが計算されます。")
+    else:
+        initial_pace = config["initial_total"] / total_days
+        current_pace = uncompleted_count / remaining_days if remaining_days > 0 else 0
+        
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            st.metric(label="🗺️ 当動作目標ペース", value=f"{initial_pace:.1f} 問 / 日")
+        with col_p2:
+            diff = current_pace - initial_pace
+            delta_val = f"{diff:+.1f} 問" if diff != 0 else "キープ中"
+            st.metric(label="🚀 現在の必要ペース", value=f"{current_pace:.1f} 問 / 日", delta=delta_val, delta_color="inverse")
+            
+        st.info(f"残り日数: **{remaining_days}日** | 未完了タスク: **{uncompleted_count}問**")
+
+# --- TAB 4: 完了履歴 ---
+with tab4:
+    st.subheader("📅 日ごとの勉強履歴")
+    df_log = load_log()
+    
+    if df_log.empty:
+        st.info("完了したタスクはここに自動で記録されます。")
+    else:
+        log_dates = sorted(list(df_log["完了日"].unique()), reverse=True)
+        selected_date = st.selectbox("確認したい日付を選択:", log_dates)
+        day_logs = df_log[df_log["完了日"] == selected_date]
+        st.write(f"### 🗓️ {selected_date} の学習内容")
+        st.success(f"この日は **{len(day_logs)} 個** のタスクを完了しました！")
+        st.dataframe(day_logs[["科目", "参考書", "章", "タスク名"]], use_container_width=True)

@@ -138,23 +138,21 @@ with tab1:
                 bg_color = "#e8f5e9" if is_done else "#fffdf0"
                 border_color = "#2e7d32" if is_done else "#f1c40f"
                 
-                st.markdown(
-                    f"""
-                    <div style="
-                        background-color: {bg_color}; 
-                        border: 2px solid {border_color}; 
-                        padding: 12px; 
-                        border-radius: 8px; 
-                        margin-bottom: 8px;
-                    ">
-                        <span style="font-weight: bold; font-size: 13px; color: {border_color};">{status_text}</span><br>
-                        <span style="font-size: 16px; font-weight: bold; color: #1e1e1e;">📘 {task['科目']} / {task['参考書']}</span><br>
-                        <span style="font-size: 13px; color: #555555;">📁 {task['章']}</span><br>
-                        <span style="font-size: 15px; font-weight: bold; color: #2c3e50;">🔥 クエスト: {task['タスク名']}</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
+                html_code = f"""
+                <div style="
+                    background-color: {bg_color}; 
+                    border: 2px solid {border_color}; 
+                    padding: 12px; 
+                    border-radius: 8px; 
+                    margin-bottom: 8px;
+                ">
+                    <span style="font-weight: bold; font-size: 13px; color: {border_color};">{status_text}</span><br>
+                    <span style="font-size: 16px; font-weight: bold; color: #1e1e1e;">📘 {task['科目']} / {task['参考書']}</span><br>
+                    <span style="font-size: 13px; color: #555555;">📁 {task['章']}</span><br>
+                    <span style="font-size: 15px; font-weight: bold; color: #2c3e50;">🔥 クエスト: {task['タスク名']}</span>
+                </div>
+                """
+                st.markdown(html_code, unsafe_allow_html=True)
                 
                 checked = st.checkbox(
                     f"完了したらチェック！ (ID: {task_id})", 
@@ -416,23 +414,21 @@ with tab_list:
                 bg_color = "#e8f5e9" if row["完了フラグ"] == 1 else "#f5f5f5"
                 border_color = "#2e7d32" if row["完了フラグ"] == 1 else "#9e9e9e"
                 
-                st.markdown(
-                    f"""
-                    <div style="
-                        background-color: {bg_color}; 
-                        border: 1px solid {border_color}; 
-                        padding: 12px; 
-                        border-radius: 8px; 
-                        margin-bottom: 10px;
-                    ">
-                        <span style="font-weight: bold; font-size: 14px; color: {border_color};">{status_emoji} (ID: {row['ID']})</span><br>
-                        <span style="font-size: 16px; font-weight: bold; color: #1e1e1e;">📘 {row['科目']} / {row['参考書']}</span><br>
-                        <span style="font-size: 14px; color: #555555;">📁 章: {row['章']}</span><br>
-                        <span style="font-size: 15px; font-weight: bold; color: #2c3e50;">⚔️ クエスト: {row['タスク名']}</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
+                html_code_list = f"""
+                <div style="
+                    background-color: {bg_color}; 
+                    border: 1px solid {border_color}; 
+                    padding: 12px; 
+                    border-radius: 8px; 
+                    margin-bottom: 10px;
+                ">
+                    <span style="font-weight: bold; font-size: 14px; color: {border_color};">{status_emoji} (ID: {row['ID']})</span><br>
+                    <span style="font-size: 16px; font-weight: bold; color: #1e1e1e;">📘 {row['科目']} / {row['参考書']}</span><br>
+                    <span style="font-size: 14px; color: #555555;">📁 章: {row['章']}</span><br>
+                    <span style="font-size: 15px; font-weight: bold; color: #2c3e50;">⚔️ クエスト: {row['タスク名']}</span>
+                </div>
+                """
+                st.markdown(html_code_list, unsafe_allow_html=True)
             
             st.write("---")
             st.write("⚠️ **タスクの削除（個別・一括）**")
@@ -477,4 +473,7 @@ with tab3:
     with col_e:
         end_date = st.date_input("夏休み最終日", config["end_date"])
         
-    if st.button("スケジュール
+    if st.button("スケジュールを保存する"):
+        total_tasks = len(df_tasks)
+        save_config(start_date, end_date, total_tasks)
+        st.success("スケジュールと初期タスク数を

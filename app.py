@@ -62,7 +62,7 @@ config = load_config()
 deadline_date = datetime.datetime.strptime(config["Deadline"], "%Y-%m-%d").date()
 weekly_days = int(config["WeeklyDays"])
 
-# 4つのタブに拡張
+# 4つのタブ構成
 tab_main, tab_report, tab_list, tab_register = st.tabs([
     "🎮 クエストに挑戦", 
     "📊 勉強の記録", 
@@ -205,7 +205,7 @@ with tab_main:
             num_tasks = st.number_input("挑戦する問題数を選択してください:", min_value=1, max_value=len(uncompleted), value=1)
             
             if st.button("🎲 クエストを発生させる (順番が早いものから優先選択)", use_container_width=True):
-                # 完全ランダムではなく、ID順の上位から選出（間違えて後ろに回した問題は後に出てくるようにする）
+                # 間違えて後ろに回した問題は後に出てくるように、ID順の上位から選出
                 candidates = uncompleted.head(num_tasks * 2).to_dict('records')
                 random.shuffle(candidates)
                 st.session_state.today_menu = candidates[:num_tasks]
@@ -301,11 +301,9 @@ with tab_report:
     if df_log.empty:
         st.info("勉強時間のログがまだありません。クエストをクリアすると自動で集計されます。")
     else:
-        # 1週間の定義（今日から数えて7日前まで）
         one_week_ago = today - datetime.timedelta(days=7)
         df_log_week = df_log[df_log["CompletedDate"] >= one_week_ago]
         
-        # 総計と1週間の合計時間の計算
         total_minutes = df_log["Minutes"].sum()
         week_minutes = df_log_week["Minutes"].sum()
         
@@ -327,19 +325,15 @@ with tab_report:
         st.write("---")
         st.write("#### 📈 教科ごとの勉強時間 (棒グラフ)")
         
-        # グラフの表示期間切り替え
         graph_period = st.radio("グラフの集計期間：", ["全体期間", "直近1週間"], horizontal=True)
-        
         target_df = df_log_week if graph_period == "直近1週間" else df_log
         
         if target_df.empty:
             st.warning("選択した期間のログがありません。")
         else:
-            # 教科（Subject）ごとに「分」を合計
             subject_summary = target_df.groupby("Subject")["Minutes"].sum().reset_index()
             subject_summary.columns = ["教科", "勉強時間(分)"]
             
-            # Streamlit標準のシンプルな棒グラフ表示
             st.bar_chart(
                 data=subject_summary.set_index("教科"),
                 y="勉強時間(分)",
@@ -347,14 +341,14 @@ with tab_report:
             )
 
 
-# --- TAB 3: 📋 登録タスク一覧 ---
+# --- TAB 3: 📋 登録タスク一覧 (科目別に整理!) ---
 with tab_list:
     st.write("### 📋 登録タスク一覧")
     
     if df_tasks.empty:
         st.info("現在登録されているタスクはありません。")
     else:
-        st.write("現在登録されているすべてのタスクです。絞り込みや検索も行えます。")
+        st.write("登録されているタスクを科目別にまとめて表示しています。アコーディオンを開くと詳細を確認できます。")
         
         # 表示用の加工
         df_display = df_tasks.copy()
@@ -367,12 +361,21 @@ with tab_list:
             "TaskName": "タスク名"
         })
         
-        # 不要なフラグ列を非表示にして表示
-        st.dataframe(
-            df_display[["タスクID", "科目", "参考書", "章名", "タスク名", "状況"]].sort_values(by="タスクID"),
-            use_container_width=True,
-            hide_index=True
-        )
+        # 登録されている科目のユニーク値を取得してループ処理
+        unique_subjects = sorted(df_display["科目"].unique())
+        
+        for sub in unique_subjects:
+            df_sub = df_display[df_display["科目"] == sub]
+            total_count = len(df_sub)
+            completed_count = len(df_sub[df_sub["状況"] == "✅ クリア済"])
+            
+            # 科目ごとのアコーディオンを設置（デフォルトで開く設定）
+            with st.expander(f"📁 {sub} (クリア数: {completed_count}/{total_count} 問)", expanded=True):
+                st.dataframe(
+                    df_sub[["タスクID", "参考書", "章名", "タスク名", "状況"]].sort_values(by="タスクID"),
+                    use_container_width=True,
+                    hide_index=True
+                )
 
 
 # --- TAB 4: 管理・一括登録画面 ---
@@ -485,7 +488,4 @@ with tab_register:
             st.session_state.drill_sub = None
             st.session_state.drill_book = None
             st.session_state.drill_chap = None
-            st.session_state.today_menu = []
-            
-            st.success("すべてのデータを完全消去し、リセットしました！")
-            st.rerun()
+            st.session_state.t

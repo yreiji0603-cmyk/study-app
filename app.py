@@ -234,9 +234,10 @@ with tab_register:
     with st.form("register_form"):
         col1, col2 = st.columns(2)
         with col1:
-            reg_sub = st.text_input("1. 科目名 (例: 数学)", "")
-            reg_book = st.text_input("2. 参考書名 (例: 青チャート)", "")
-            reg_chap = st.text_input("3. 章名 (例: 第1章)", "")
+            # 💡 例（数学、青チャート、第1章）のデフォルト表示を「完全に空のテキストボックス」に変更しました！
+            reg_sub = st.text_input("1. 科目名 (例: 数学)", value="")
+            reg_book = st.text_input("2. 参考書名 (例: 青チャート)", value="")
+            reg_chap = st.text_input("3. 章名 (例: 第1章)", value="")
         with col2:
             reg_prefix = st.selectbox("4. 種類を選んでください", ["例題", "練習"])
             start_num = st.number_input("5. 開始番号 (例: 15 から開始)", min_value=1, value=1)

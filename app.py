@@ -7,7 +7,7 @@ import os
 # --- データベースファイルの定義 ---
 TASKS_FILE = "tasks_db.csv"     # タスク一覧
 LOG_FILE = "completed_log.csv"  # 完了履歴
-CONFIG_FILE = "config_db.csv"   # スケジュール設定
+CONFIG_FILE = "config_db.csv"   # スケジュール設定（期日など）
 
 # --- データ読み込み・保存の関数 ---
 def load_tasks():
@@ -28,6 +28,21 @@ def load_log():
 def save_log(df):
     df.to_csv(LOG_FILE, index=False)
 
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        df = pd.read_csv(CONFIG_FILE)
+        if not df.empty:
+            return df.iloc[0].to_dict()
+    # デフォルト設定
+    return {
+        "Deadline": str(datetime.date.today() + datetime.timedelta(days=30)),
+        "WeeklyDays": 5
+    }
+
+def save_config(deadline, weekly_days):
+    df = pd.DataFrame([{"Deadline": str(deadline), "WeeklyDays": int(weekly_days)}])
+    df.to_csv(CONFIG_FILE, index=False)
+
 # --- 画面構成の設定 ---
 st.set_page_config(page_title="Quest Study", page_icon="🎒", layout="centered")
 st.title("🎒 Quest Study Manager")
@@ -36,11 +51,16 @@ st.title("🎒 Quest Study Manager")
 st.link_button("🌐 アプリのページを開く", "https://share.streamlit.io/", use_container_width=True)
 
 # 2つの大画面を切り替えるタブ
-tab_main, tab_register = st.tabs(["🎮 クエストに挑戦 (メイン)", "➕ タスクの登録・削除"])
+tab_main, tab_register = st.tabs(["🎮 クエストに挑戦 (メイン)", "➕ タスクの登録・管理"])
 
-# データ読み込み
+# データのロード
 df_tasks = load_tasks()
 df_log = load_log()
+config = load_config()
+
+# スケジュール設定値の取り出し
+deadline_date = datetime.datetime.strptime(config["Deadline"], "%Y-%m-%d").date()
+weekly_days = int(config["WeeklyDays"])
 
 # --- セッション状態の初期化 ---
 if "drill_sub" not in st.session_state:
@@ -54,6 +74,51 @@ if "today_menu" not in st.session_state:
 
 # --- TAB 1: メイン画面 (ドリルダウン ＆ クエスト) ---
 with tab_main:
+    
+    # 📈 ペース・スケジュール状況の表示
+    st.write("### 📈 スケジュール状況")
+    
+    # 未完了のタスク総数
+    uncompleted_total = len(df_tasks[df_tasks["DoneFlag"] == 0]) if not df_tasks.empty else 0
+    today = datetime.date.today()
+    days_left = (deadline_date - today).days
+    
+    if uncompleted_total == 0:
+        st.success("🎉 現在、残りのタスクはありません！素晴らしい状態です！")
+    elif days_left <= 0:
+        st.error(f"🚨 目標期日（{deadline_date}）を過ぎています！スケジュールを再設定するか、一気に片付けましょう！")
+    else:
+        # 1. 期日までに終わらせるための理論上のペース
+        # 週の勉強日数の割合 (例: 5日/7日)
+        day_ratio = weekly_days / 7.0
+        active_days_left = max(1, round(days_left * day_ratio))
+        required_per_day = uncompleted_total / active_days_left
+        
+        # 2. 直近の完了ペース（過去7日間の完了履歴から算出）
+        past_7_days = today - datetime.timedelta(days=7)
+        recent_done = len(df_log[df_log["CompletedDate"] >= past_7_days])
+        actual_per_day = recent_done / weekly_days  # 週の目標日数ベースで日換算
+        
+        # 計算結果の可視化カード
+        col_sch1, col_sch2 = st.columns(2)
+        with col_sch1:
+            st.metric(
+                label="🎯 期日までに必要なペース",
+                value=f"1日 あたり {required_per_day:.1f} 問",
+                help="期日までに残りの問題を解き終えるために、勉強する日1日あたりに解くべき問題数です。"
+            )
+        with col_sch2:
+            st.metric(
+                label="🔥 あなたの現在のペース",
+                value=f"1日 あたり {actual_per_day:.1f} 問",
+                delta=f"{actual_per_day - required_per_day:.1f} 問" if actual_per_day >= required_per_day else f"{actual_per_day - required_per_day:.1f} 問",
+                delta_color="normal" if actual_per_day >= required_per_day else "inverse",
+                help="過去7日間の完了履歴に基づいた、あなたの現在のリアルな勉強ペースです。"
+            )
+            
+        st.info(f"📅 目標期日: **{deadline_date}** (残り **{days_left}日** / 勉強予定日数: 残り約 **{active_days_left}日**)")
+
+    st.write("---")
     st.write("### 📂 勉強する場所を選択")
 
     # 🗺️ Windows風のパンくずリスト (各項目がクリック可能)
@@ -90,7 +155,7 @@ with tab_main:
 
     # ⬇️ 選択状況に応じたドリルダウン表示
     if df_tasks.empty:
-        st.info("まずは「タスクの登録・削除」タブからクエストを登録してください！")
+        st.info("まずは「タスクの登録・管理」タブからクエストを登録してください！")
         
     elif st.session_state.drill_sub is None:
         st.write("#### 1. 科目を選んでください：")
@@ -159,9 +224,6 @@ with tab_main:
                 st.write("---")
                 today = datetime.date.today()
                 
-                # 完了履歴から今日完了したIDを取得
-                today_completed_ids = df_log[df_log["CompletedDate"] == today]["TaskID"].tolist()
-                
                 for task in st.session_state.today_menu:
                     task_id = int(task["ID"])
                     # もし他の画面で更新されていた時のために現在のDoneFlagをチェック
@@ -225,23 +287,39 @@ with tab_main:
                         st.rerun()
 
 
-# --- TAB 2: 管理・一括登録画面 (案Bベース) ---
+# --- TAB 2: 管理・一括登録画面 ---
 with tab_register:
     st.write("### 📝 タスクの追加・整理")
     
-    # --- 1. 一括登録フォーム ---
-    st.write("#### ➕ 連続登録 (案B)")
+    # --- 1. スケジュール（期日）設定フォーム ---
+    st.write("#### 📅 目標期日の設定")
+    with st.form("schedule_form"):
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            new_deadline = st.date_input("目標期日（いつまでに全て解き終えるか）", deadline_date)
+        with col_s2:
+            new_weekly_days = st.slider("週に何日勉強するか", min_value=1, max_value=7, value=weekly_days)
+            
+        save_sch_btn = st.form_submit_button("スケジュールを設定する")
+        if save_sch_btn:
+            save_config(new_deadline, new_weekly_days)
+            st.success("スケジュール設定を保存しました！")
+            st.rerun()
+            
+    st.write("---")
+    
+    # --- 2. 一括登録フォーム ---
+    st.write("#### ➕ クエストをまとめて登録")
     with st.form("register_form"):
         col1, col2 = st.columns(2)
         with col1:
-            # 💡 例（数学、青チャート、第1章）のデフォルト表示を「完全に空のテキストボックス」に変更しました！
             reg_sub = st.text_input("1. 科目名 (例: 数学)", value="")
             reg_book = st.text_input("2. 参考書名 (例: 青チャート)", value="")
             reg_chap = st.text_input("3. 章名 (例: 第1章)", value="")
         with col2:
             reg_prefix = st.selectbox("4. 種類を選んでください", ["例題", "練習"])
-            start_num = st.number_input("5. 開始番号 (例: 15 から開始)", min_value=1, value=1)
-            total_count = st.number_input("6. 生成する個数 (例: 5問分)", min_value=1, max_value=100, value=5)
+            start_num = st.number_input("5. 開始番号", min_value=1, value=1)
+            total_count = st.number_input("6. 生成する個数", min_value=1, max_value=100, value=5)
             
         submit_btn = st.form_submit_button("上記の設定で連続登録する")
         
@@ -273,7 +351,7 @@ with tab_register:
 
     st.write("---")
 
-    # --- 2. 個別削除フォーム (飛び番・使わない単元の整理用) ---
+    # --- 3. 個別削除フォーム (飛び番・使わない単元の整理用) ---
     st.write("#### 🗑️ 不要なタスクを個別に消す (飛び番対策)")
     if df_tasks.empty:
         st.info("まだ登録されているタスクがありません。")
@@ -309,7 +387,7 @@ with tab_register:
 
     st.write("---")
     
-    # --- 3. 完全初期化 ---
+    # --- 4. 完全初期化 ---
     st.write("#### 🔥 データの全削除 (初期化)")
     confirm_reset = st.checkbox("本当にすべての登録データを削除してやり直す場合はチェックを入れてください")
     if confirm_reset:

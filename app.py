@@ -1,19 +1,17 @@
 import streamlit as st
 import pandas as pd
 import datetime
-import random
 import os
 
 # --- データベースファイルの定義 ---
 TASKS_FILE = "tasks_db.csv"     # タスク一覧
-LOG_FILE = "completed_log.csv"  # 完了履歴
+LOG_FILE = "completed_log.csv"  # 完了・勉強時間履歴
 CONFIG_FILE = "config_db.csv"   # スケジュール設定
 
 # --- データ読み込み・保存の関数 ---
 def load_tasks():
     if os.path.exists(TASKS_FILE):
         df = pd.read_csv(TASKS_FILE)
-        # IDを整数型に保証
         df['ID'] = df['ID'].astype(int)
         return df
     return pd.DataFrame(columns=["ID", "Subject", "Book", "Chapter", "TaskName", "DoneFlag"])
@@ -25,11 +23,10 @@ def load_log():
     if os.path.exists(LOG_FILE):
         df = pd.read_csv(LOG_FILE)
         df['CompletedDate'] = pd.to_datetime(df['CompletedDate']).dt.date
-        # 勉強時間列がない古いデータへの対策
-        if "Minutes" not in df.columns:
-            df["Minutes"] = 5  # デフォルトで5分
+        if "Hours" not in df.columns:
+            df["Hours"] = 1.0  # デフォルトで1時間
         return df
-    return pd.DataFrame(columns=["TaskID", "CompletedDate", "Subject", "Book", "Chapter", "TaskName", "Minutes"])
+    return pd.DataFrame(columns=["CompletedDate", "Subject", "Hours"])
 
 def save_log(df):
     df.to_csv(LOG_FILE, index=False)
@@ -77,10 +74,6 @@ if "drill_book" not in st.session_state:
     st.session_state.drill_book = None
 if "drill_chap" not in st.session_state:
     st.session_state.drill_chap = None
-if "today_menu" not in st.session_state:
-    st.session_state.today_menu = []
-if "show_time_modal" not in st.session_state:
-    st.session_state.show_time_modal = None
 
 # --- TAB 1: メイン画面 (ドリルダウン ＆ クエスト) ---
 with tab_main:
@@ -99,19 +92,22 @@ with tab_main:
         active_days_left = max(1, round(days_left * day_ratio))
         required_per_day = uncompleted_total / active_days_left
         
-        # 直近7日間の完了数からリアルなペースを算出
+        # 直近7日間にクリアした問題数をペース算出に使用
         past_7_days = today - datetime.timedelta(days=7)
-        recent_done = len(df_log[df_log["CompletedDate"] >= past_7_days])
-        actual_per_day = recent_done / weekly_days
+        # 簡易的に完了履歴（今回の手動時間登録とは別軸。タスクのDoneFlag切り替えを元に計算）
+        # ※DoneFlag=1になった数をペース算出
+        # ここではタスク数ベースで日換算します
+        recent_done = len(df_tasks[(df_tasks["DoneFlag"] == 1)]) # 全クリア数
+        # 過去7日に完了したタスクのペース計算（今回は簡易的に目標値との比較に留めます）
+        actual_per_day = recent_done / max(1, weekly_days)
         
         col_sch1, col_sch2 = st.columns(2)
         with col_sch1:
             st.metric(label="🎯 期日までに必要なペース", value=f"1日 あたり {required_per_day:.1f} 問")
         with col_sch2:
             st.metric(
-                label="🔥 あなたの現在のペース", 
-                value=f"1日 あたり {actual_per_day:.1f} 問",
-                delta=f"{actual_per_day - required_per_day:.1f} 問"
+                label="🔥 全体の平均クリアペース", 
+                value=f"1日 あたり {actual_per_day:.1f} 問"
             )
         st.info(f"📅 目標期日: **{deadline_date}** (残り **{days_left}日** / 勉強予定日数: 残り約 **{active_days_left}日**)")
 
@@ -186,7 +182,7 @@ with tab_main:
                 st.session_state.drill_chap = chap
                 st.rerun()
 
-    # 🎯 章選択後のクエスト画面
+    # 🎯 クエスト画面（登録した順番通りに並ぶ）
     else:
         st.write(f"### ⚔️ クエストに挑戦！【{st.session_state.drill_chap}】")
         
@@ -196,129 +192,97 @@ with tab_main:
             (df_tasks["Chapter"] == st.session_state.drill_chap)
         ]
         
-        # ID順（登録順 ＆ 間違えて最後尾に送られた順）に並び替える
+        # 📌 登録された順番（IDの若い順）に上から並べる
         uncompleted = chap_tasks[chap_tasks["DoneFlag"] == 0].sort_values(by="ID")
         
         if uncompleted.empty:
             st.success("🎉 この章のすべてのクエストをクリアしました！素晴らしい！")
         else:
-            num_tasks = st.number_input("挑戦する問題数を選択してください:", min_value=1, max_value=len(uncompleted), value=1)
+            st.write("👇 上から順番に取り組んでいきましょう：")
             
-            if st.button("🎲 クエストを発生させる (順番が早いものから優先選択)", use_container_width=True):
-                # 間違えて後ろに回した問題は後に出てくるように、ID順の上位から選出
-                candidates = uncompleted.head(num_tasks * 2).to_dict('records')
-                random.shuffle(candidates)
-                st.session_state.today_menu = candidates[:num_tasks]
+            # 順番通り上から最大5問ずつ表示する
+            display_limit = 5
+            tasks_to_show = uncompleted.head(display_limit)
             
-            # 🕒 完了した時の勉強時間入力ポップアップ（インライン）
-            if st.session_state.show_time_modal is not None:
-                target_task = st.session_state.show_time_modal
-                st.info(f"👉 **「{target_task['TaskName']}」クリアおめでとう！**")
-                study_minutes = st.number_input("この問題に何分かかりましたか？", min_value=1, max_value=120, value=5)
+            for _, task in tasks_to_show.iterrows():
+                task_id = int(task["ID"])
                 
-                if st.button("時間入力を完了して保存する", use_container_width=True):
-                    # 完了処理を書き込み
-                    task_id = int(target_task["ID"])
+                html_code = f"""
+                <div style="
+                    background-color: #fffdf0; 
+                    border: 2px solid #f1c40f; 
+                    padding: 12px; 
+                    border-radius: 8px; 
+                    margin-bottom: 8px;
+                ">
+                    <span style="font-size: 16px; font-weight: bold; color: #1e1e1e;">📘 {task['Subject']} / {task['Book']}</span><br>
+                    <span style="font-size: 13px; color: #555555;">📁 {task['Chapter']}</span><br>
+                    <span style="font-size: 15px; font-weight: bold; color: #2c3e50;">🔥 クエスト: {task['TaskName']}</span>
+                </div>
+                """
+                st.markdown(html_code, unsafe_allow_html=True)
+                
+                # スッキリと「クリア！」ボタンのみを設置
+                if st.button(f"✅ クリア！ [ID: {task_id}]", key=f"clear_{task_id}", use_container_width=True):
                     df_tasks.loc[df_tasks["ID"] == task_id, "DoneFlag"] = 1
                     save_tasks(df_tasks)
-                    
-                    new_log = pd.DataFrame([{
-                        "TaskID": task_id,
-                        "CompletedDate": today,
-                        "Subject": target_task["Subject"],
-                        "Book": target_task["Book"],
-                        "Chapter": target_task["Chapter"],
-                        "TaskName": target_task["TaskName"],
-                        "Minutes": int(study_minutes)
-                    }])
-                    df_log = pd.concat([df_log, new_log], ignore_index=True)
-                    save_log(df_log)
-                    
-                    st.session_state.show_time_modal = None
-                    st.session_state.today_menu = [t for t in st.session_state.today_menu if int(t["ID"]) != task_id]
-                    st.success(f"👏 {target_task['TaskName']} を {study_minutes} 分でクリアしました！")
+                    st.success(f"👏 {task['TaskName']} クリア！")
                     st.rerun()
-                st.write("---")
-
-            # クエストカード表示
-            if st.session_state.today_menu:
-                st.write("---")
-                for task in st.session_state.today_menu:
-                    task_id = int(task["ID"])
-                    current_status = df_tasks.loc[df_tasks["ID"] == task_id, "DoneFlag"].values[0]
-                    
-                    if current_status == 1:
-                        continue  # 完了済みのものはスキップ
-                    
-                    html_code = f"""
-                    <div style="
-                        background-color: #fffdf0; 
-                        border: 2px solid #f1c40f; 
-                        padding: 12px; 
-                        border-radius: 8px; 
-                        margin-bottom: 8px;
-                    ">
-                        <span style="font-weight: bold; font-size: 13px; color: #f1c40f;">⚔️ 挑戦中</span><br>
-                        <span style="font-size: 16px; font-weight: bold; color: #1e1e1e;">📘 {task['Subject']} / {task['Book']}</span><br>
-                        <span style="font-size: 13px; color: #555555;">📁 {task['Chapter']}</span><br>
-                        <span style="font-size: 15px; font-weight: bold; color: #2c3e50;">🔥 クエスト: {task['TaskName']}</span>
-                    </div>
-                    """
-                    st.markdown(html_code, unsafe_allow_html=True)
-                    
-                    # ⭕正解 と ❌間違い のボタン
-                    btn_col1, btn_col2 = st.columns(2)
-                    with btn_col1:
-                        if st.button(f"⭕ 正解！(クリア) [ID: {task_id}]", key=f"ok_{task_id}", use_container_width=True):
-                            st.session_state.show_time_modal = task
-                            st.rerun()
-                            
-                    with btn_col2:
-                        if st.button(f"❌ 間違えた(章の最後に移動) [ID: {task_id}]", key=f"ng_{task_id}", use_container_width=True):
-                            # 「章の最後に移動」させるために、該当タスクのIDをその章の最大ID+1に書き換える
-                            all_ids_in_chap = df_tasks[df_tasks["Chapter"] == task["Chapter"]]["ID"].tolist()
-                            max_id = max(all_ids_in_chap) if all_ids_in_chap else task_id
-                            new_task_id = max_id + 1
-                            
-                            # タスクのIDをアップデート（新しいIDで並べ直すと一番後ろに回る）
-                            df_tasks.loc[df_tasks["ID"] == task_id, "ID"] = new_task_id
-                            save_tasks(df_tasks)
-                            
-                            # 完了履歴のログも整合性を保つため修正
-                            if not df_log.empty:
-                                df_log.loc[df_log["TaskID"] == task_id, "TaskID"] = new_task_id
-                                save_log(df_log)
-                            
-                            st.session_state.today_menu = [t for t in st.session_state.today_menu if int(t["ID"]) != task_id]
-                            st.warning(f"🔄 {task['TaskName']} は章の最後に移動されました。もう一度挑戦しましょう！")
-                            st.rerun()
 
 
-# --- TAB 2: 📊 勉強の記録 ---
+# --- TAB 2: 📊 勉強の記録（手動で1時間単位登録 ＆ グラフ表示） ---
 with tab_report:
+    st.write("### ✍️ 勉強時間を記録する")
+    
+    # 登録されている教科をセレクトボックスの選択肢にする
+    subject_list = sorted(list(df_tasks["Subject"].unique())) if not df_tasks.empty else ["数学", "英語", "国語", "理科", "社会"]
+    
+    with st.form("study_time_form"):
+        col_t1, col_t2, col_t3 = st.columns(3)
+        with col_t1:
+            record_date = st.date_input("勉強した日", today)
+        with col_t2:
+            record_sub = st.selectbox("教科名", subject_list)
+        with col_t3:
+            # 1時間単位で決定できるようにスライダー・数値入力
+            record_hours = st.number_input("勉強時間 (時間)", min_value=1, max_value=24, value=1, step=1)
+            
+        submit_time = st.form_submit_button("勉強時間を記録する")
+        if submit_time:
+            new_log = pd.DataFrame([{
+                "CompletedDate": record_date,
+                "Subject": record_sub,
+                "Hours": float(record_hours)
+            }])
+            df_log = pd.concat([df_log, new_log], ignore_index=True)
+            save_log(df_log)
+            st.success(f"📝 {record_date} に「{record_sub}」を {record_hours}時間 勉強した記録を保存しました！")
+            st.rerun()
+            
+    st.write("---")
     st.write("### 📊 勉強時間の分析レポート")
     
     if df_log.empty:
-        st.info("勉強時間のログがまだありません。クエストをクリアすると自動で集計されます。")
+        st.info("勉強時間のログがまだありません。上のフォームから本日の勉強時間を登録してみましょう！")
     else:
         one_week_ago = today - datetime.timedelta(days=7)
         df_log_week = df_log[df_log["CompletedDate"] >= one_week_ago]
         
-        total_minutes = df_log["Minutes"].sum()
-        week_minutes = df_log_week["Minutes"].sum()
+        total_hours = df_log["Hours"].sum()
+        week_hours = df_log_week["Hours"].sum()
         
-        st.write("#### ⏳ 合計勉強時間（数字）")
+        st.write("#### ⏳ 合計勉強時間（時間単位の数字）")
         col_m1, col_m2 = st.columns(2)
         with col_m1:
             st.metric(
                 label="🎒 全体の総勉強時間", 
-                value=f"{total_minutes // 60}時間 {total_minutes % 60}分",
-                help="アプリを始めてからの累計勉強時間です。"
+                value=f"{int(total_hours)} 時間",
+                help="手動登録された累計勉強時間です。"
             )
         with col_m2:
             st.metric(
                 label="📅 直近1週間の勉強時間", 
-                value=f"{week_minutes // 60}時間 {week_minutes % 60}分",
+                value=f"{int(week_hours)} 時間",
                 help="過去7日間の勉強時間の合計です。"
             )
             
@@ -331,17 +295,19 @@ with tab_report:
         if target_df.empty:
             st.warning("選択した期間のログがありません。")
         else:
-            subject_summary = target_df.groupby("Subject")["Minutes"].sum().reset_index()
-            subject_summary.columns = ["教科", "勉強時間(分)"]
+            # 教科（Subject）ごとに「時間（Hours）」を合計
+            subject_summary = target_df.groupby("Subject")["Hours"].sum().reset_index()
+            subject_summary.columns = ["教科", "勉強時間(時間)"]
             
+            # Streamlit標準のシンプルな棒グラフ表示
             st.bar_chart(
                 data=subject_summary.set_index("教科"),
-                y="勉強時間(分)",
+                y="勉強時間(時間)",
                 use_container_width=True
             )
 
 
-# --- TAB 3: 📋 登録タスク一覧 (科目別に整理!) ---
+# --- TAB 3: 📋 登録タスク一覧 (科目別に整理) ---
 with tab_list:
     st.write("### 📋 登録タスク一覧")
     
@@ -361,7 +327,6 @@ with tab_list:
             "TaskName": "タスク名"
         })
         
-        # 登録されている科目のユニーク値を取得してループ処理
         unique_subjects = sorted(df_display["科目"].unique())
         
         for sub in unique_subjects:
@@ -369,8 +334,8 @@ with tab_list:
             total_count = len(df_sub)
             completed_count = len(df_sub[df_sub["状況"] == "✅ クリア済"])
             
-            # 科目ごとのアコーディオンを設置（デフォルトで開く設定）
             with st.expander(f"📁 {sub} (クリア数: {completed_count}/{total_count} 問)", expanded=True):
+                # ID順（登録順・上から順）に並べ替えて表示
                 st.dataframe(
                     df_sub[["タスクID", "参考書", "章名", "タスク名", "状況"]].sort_values(by="タスクID"),
                     use_container_width=True,
@@ -468,7 +433,6 @@ with tab_register:
         if st.button("🚨 選択したクエストを削除する", use_container_width=True):
             df_tasks = df_tasks[df_tasks["ID"] != selected_delete_task]
             save_tasks(df_tasks)
-            st.session_state.today_menu = [t for t in st.session_state.today_menu if t["ID"] != selected_delete_task]
             st.success("指定したクエストを削除しました！")
             st.rerun()
 
@@ -482,10 +446,12 @@ with tab_register:
             df_empty = pd.DataFrame(columns=["ID", "Subject", "Book", "Chapter", "TaskName", "DoneFlag"])
             save_tasks(df_empty)
             
-            df_log_empty = pd.DataFrame(columns=["TaskID", "CompletedDate", "Subject", "Book", "Chapter", "TaskName", "Minutes"])
+            df_log_empty = pd.DataFrame(columns=["CompletedDate", "Subject", "Hours"])
             save_log(df_log_empty)
             
             st.session_state.drill_sub = None
             st.session_state.drill_book = None
             st.session_state.drill_chap = None
-            st.session_state.t
+            
+            st.success("すべてのデータを完全消去し、リセットしました！")
+            st.rerun()
